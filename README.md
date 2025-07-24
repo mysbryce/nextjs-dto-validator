@@ -213,7 +213,7 @@ const userSchema: DTOSchema = {
 }
 
 app.post('/users', validationMiddleware(userSchema), (req, res) => {
-  // req.validatedData contains the validated data
+  // req.validatedData contains the validated data (any)
   console.log(req.validatedData)
   res.json({ success: true })
 })
