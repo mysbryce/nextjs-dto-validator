@@ -1,6 +1,6 @@
 {
   "name": "nextjs-dto-validator",
-  "version": "1.0.1",
+  "version": "1.0.1.1",
   "description": "TypeScript DTO validation library for Next.js API routes",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
