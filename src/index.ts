@@ -2,7 +2,6 @@ export * from './types'
 export * from './validator'
 export * from './decorators'
 export * from './validators/common'
-import './express.d'
 
 // Import validators และ DTOSchema สำหรับใช้ใน file นี้
 import { validators } from './validators/common'
