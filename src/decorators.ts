@@ -85,7 +85,7 @@ export function validationMiddleware<T>(schema: DTOSchema) {
 declare global {
     namespace Express {
         interface Request {
-            validatedData?: any | null
+            validatedData?: any
         }
     }
 }
