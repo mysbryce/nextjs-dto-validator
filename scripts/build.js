@@ -2,7 +2,7 @@
 const fs = require('fs')
 const path = require('path')
 
-console.log('🏗️  Post-build processing...')
+console.log('🏗️  Post-build processing... ')
 
 try {
     // Check if express.d.ts exists in src and copy to lib
