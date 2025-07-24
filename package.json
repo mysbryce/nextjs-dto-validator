@@ -1,0 +1,49 @@
+{
+  "name": "nextjs-dto-validator",
+  "version": "1.0.0",
+  "description": "TypeScript DTO validation library for Next.js API routes",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/**/*"
+  ],
+  "scripts": {
+    "build": "rimraf lib && tsc",
+    "dev": "ts-node src/index.ts",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "prepublishOnly": "npm run build",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "nextjs",
+    "dto",
+    "validation",
+    "typescript",
+    "api",
+    "request-validation"
+  ],
+  "author": "Kittichai Mala-In <fx.frame009@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mysbryce/nextjs-dto-validator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mysbryce/nextjs-dto-validator/issues"
+  },
+  "homepage": "https://github.com/mysbryce/nextjs-dto-validator#readme",
+  "peerDependencies": {
+    "typescript": ">=4.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.4.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}
