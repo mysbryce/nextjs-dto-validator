@@ -81,3 +81,11 @@ export function validationMiddleware<T>(schema: DTOSchema) {
         next()
     }
 }
+
+declare global {
+    namespace Express {
+        interface Request {
+            validatedData?: any;
+        }
+    }
+}
