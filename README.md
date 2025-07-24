@@ -204,7 +204,7 @@ import { validationMiddleware, DTOSchema } from 'nextjs-dto-validator'
 
 const app = express()
 
-app.use(express.json());
+app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
 const userSchema: DTOSchema = {
