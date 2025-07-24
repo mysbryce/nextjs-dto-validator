@@ -1,26 +1,91 @@
-name: Manual Release
+name: Auto Release and Publish
 
 on:
-  workflow_dispatch:
-    inputs:
-      version-type:
-        description: "Version bump type"
-        required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-          - prerelease
-      release-notes:
-        description: "Custom release notes (optional)"
-        required: false
-        type: string
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'tsconfig.json'
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 jobs:
-  manual-release:
+  check-changes:
     runs-on: ubuntu-latest
+    outputs:
+      should-release: ${{ steps.check.outputs.should-release }}
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if should release
+        id: check
+        run: |
+          # ตรวจสอบว่ามีการเปลี่ยนแปลงใน src/, package.json หรือไม่
+          if git diff --name-only HEAD~1 HEAD | grep -E "(src/|package\.json|tsconfig\.json)" > /dev/null; then
+            echo "should-release=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get package version
+        id: package
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  test-and-build:
+    needs: check-changes
+    if: needs.check-changes.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint --if-present
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build package
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: lib/
+
+  auto-version-and-release:
+    needs: [check-changes, test-and-build]
+    if: needs.check-changes.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      new-version: ${{ steps.version.outputs.new-version }}
+      release-created: ${{ steps.version.outputs.release-created }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -31,8 +96,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
-          registry-url: "https://registry.npmjs.org"
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Configure Git
         run: |
@@ -42,66 +107,94 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-files
+          path: lib/
 
-      - name: Build package
-        run: npm run build
+      - name: Determine version bump
+        id: version-type
+        run: |
+          # ตรวจสอบ commit message เพื่อกำหนดประเภท version bump
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          
+          if echo "$COMMIT_MSG" | grep -qE "\[major\]|\bBREAKING\b"; then
+            echo "version-type=major" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qE "\[minor\]|\bfeat\b|\bfeature\b"; then
+            echo "version-type=minor" >> $GITHUB_OUTPUT
+          else
+            echo "version-type=patch" >> $GITHUB_OUTPUT
+          fi
 
       - name: Bump version
         id: version
         run: |
           OLD_VERSION=$(node -p "require('./package.json').version")
-          npm version ${{ github.event.inputs.version-type }} --no-git-tag-version
+          npm version ${{ steps.version-type.outputs.version-type }} --no-git-tag-version
           NEW_VERSION=$(node -p "require('./package.json').version")
-
+          
           echo "old-version=$OLD_VERSION" >> $GITHUB_OUTPUT
           echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "release-created=true" >> $GITHUB_OUTPUT
 
       - name: Create release archive
         run: |
+          # สร้าง zip file ที่มี source code ทั้งหมด
           VERSION=${{ steps.version.outputs.new-version }}
           ARCHIVE_NAME="nextjs-dto-validator-$VERSION.zip"
-
+          
+          # สร้าง temporary directory
           mkdir -p release-temp
+          
+          # Copy ไฟล์ทั้งหมดยกเว้น node_modules และ .git
           rsync -av --exclude='node_modules' \
                    --exclude='.git' \
                    --exclude='release-temp' \
                    --exclude='*.zip' \
                    . release-temp/
-
+          
+          # สร้าง zip file
           cd release-temp
           zip -r "../$ARCHIVE_NAME" .
           cd ..
-
+          
           echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
           echo "ARCHIVE_PATH=$(pwd)/$ARCHIVE_NAME" >> $GITHUB_ENV
 
-      - name: Generate release notes
+      - name: Generate changelog
+        id: changelog
         run: |
+          # สร้าง changelog จาก git commits
           VERSION=${{ steps.version.outputs.new-version }}
-
-          if [ -n "${{ github.event.inputs.release-notes }}" ]; then
-            echo "${{ github.event.inputs.release-notes }}" > RELEASE_NOTES.md
-            echo "" >> RELEASE_NOTES.md
+          OLD_VERSION=${{ steps.version.outputs.old-version }}
+          
+          echo "## 🚀 What's New in v$VERSION" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          
+          # ดึง commits ตั้งแต่ version ล่าสุด
+          if git tag "v$OLD_VERSION" >/dev/null 2>&1; then
+            echo "### 📝 Changes:" >> CHANGELOG.md
+            git log v$OLD_VERSION..HEAD --pretty="- %s (%h)" --no-merges >> CHANGELOG.md
           else
-            echo "## 🚀 Release v$VERSION" > RELEASE_NOTES.md
-            echo "" >> RELEASE_NOTES.md
+            echo "### 📝 Changes:" >> CHANGELOG.md
+            git log --pretty="- %s (%h)" --no-merges -10 >> CHANGELOG.md
           fi
+          
+          echo "" >> CHANGELOG.md
+          echo "### 📦 Installation" >> CHANGELOG.md
+          echo "\`\`\`bash" >> CHANGELOG.md
+          echo "npm install nextjs-dto-validator@$VERSION" >> CHANGELOG.md
+          echo "\`\`\`" >> CHANGELOG.md
 
-          echo "### 📝 Recent Changes:" >> RELEASE_NOTES.md
-          git log --pretty="- %s (%h)" --no-merges -5 >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-          echo "### 📦 Installation" >> RELEASE_NOTES.md
-          echo "\`\`\`bash" >> RELEASE_NOTES.md
-          echo "npm install nextjs-dto-validator@$VERSION" >> RELEASE_NOTES.md
-          echo "\`\`\`" >> RELEASE_NOTES.md
-
-      - name: Commit and push
+      - name: Commit version bump
         run: |
           git add package.json package-lock.json
-          git commit -m "chore: release v${{ steps.version.outputs.new-version }}"
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new-version }} [skip ci]"
           git tag "v${{ steps.version.outputs.new-version }}"
+
+      - name: Push changes
+        run: |
           git push origin main
           git push origin "v${{ steps.version.outputs.new-version }}"
 
@@ -111,14 +204,44 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.new-version }}
           name: "🚀 Release v${{ steps.version.outputs.new-version }}"
-          body_path: RELEASE_NOTES.md
+          body_path: CHANGELOG.md
           files: ${{ env.ARCHIVE_PATH }}
           draft: false
-          prerelease: ${{ github.event.inputs.version-type == 'prerelease' }}
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-to-npm:
+    needs: [auto-version-and-release]
+    if: needs.auto-version-and-release.outputs.release-created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main  # Pull ล่าสุดหลัง version bump
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-files
+          path: lib/
 
       - name: Publish to npm
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Notify success
+        run: |
+          echo "🎉 Successfully published nextjs-dto-validator@${{ needs.auto-version-and-release.outputs.new-version }} to npm!"
+          echo "📦 Install with: npm install nextjs-dto-validator@${{ needs.auto-version-and-release.outputs.new-version }}"
